@@ -111,8 +111,10 @@ const System = struct {
         const params = comptime fn_info.params;
         comptime {
             if (info != .@"fn") @compileError("Expected a function");
-            if (fn_info.return_type != void) @compileError("Expected function with return type of void");
+            // if (fn_info.return_type != anyerror!void) @compileError("Expected function with return type of anyerror!void");
             if (fn_info.params.len == 0) @compileError("Expected function with params");
+            const return_info = @typeInfo(fn_info.return_type.?);
+            if (return_info != .error_union) @compileError("Expected function with an error union return type");
 
             for (params) |param_opt| {
                 // const param = @typeInfo(param_opt.type.?);
@@ -145,7 +147,7 @@ const System = struct {
                         @field(args, field.name) = query;
                     }
                 }
-                @call(.auto, self, args);
+                try @call(.auto, self, args);
             }
         };
 

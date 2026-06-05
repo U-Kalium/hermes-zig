@@ -27,7 +27,7 @@ pub fn main() !void {
     try world.runSystem(PrintSystems);
 }
 
-fn initEntities(manager: ecs.EntityManager) void {
+fn initEntities(manager: ecs.EntityManager) !void {
     // var manager = manager;
     const foo = Foo{ .bar = 10 };
     const bar = Bar{ .buzz = "Your Mom" };
@@ -45,7 +45,7 @@ fn initEntities(manager: ecs.EntityManager) void {
     }) catch @panic("Could not create entity");
 }
 
-fn printFooBarBuzz(entities: []struct { foo: *const Foo, buzz: *const Buzz }, entities2: []struct { bar: *const Bar }) void {
+fn printFooBarBuzz(entities: []struct { foo: *const Foo, buzz: *const Buzz }, entities2: []struct { bar: *const Bar }) !void {
     std.debug.print("Foo Buzz Entities\n", .{});
     for (entities) |entity| {
         std.debug.print("{}\n", .{entity});
@@ -56,7 +56,7 @@ fn printFooBarBuzz(entities: []struct { foo: *const Foo, buzz: *const Buzz }, en
     }
 }
 
-fn modifyFooBarBuzz(entities: []struct { foo: *Foo, buzz: *Buzz }, entities2: []struct { bar: *Bar }) void {
+fn modifyFooBarBuzz(entities: []struct { foo: *Foo, buzz: *Buzz }, entities2: []struct { bar: *Bar }) !void {
     for (entities) |entity| {
         entity.foo.bar += 1;
         entity.buzz.a += 1.0;
