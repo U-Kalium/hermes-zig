@@ -7,6 +7,9 @@ const Foo = struct { bar: u32 };
 const Bar = struct { buzz: []const u8 };
 const Buzz = struct { a: f32 };
 
+const PrintSystems = struct {};
+const ModifySystems = struct {};
+
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     var world = ecs.World.init(allocator);
@@ -27,11 +30,12 @@ pub fn main() !void {
         foo3,
     });
 
-    try world.addSystem(printFooBarBuzz);
-    try world.addSystem(modifyFooBarBuzz);
-    try world.addSystem(printFooBarBuzz);
+    try world.addSystem(printFooBarBuzz, PrintSystems);
+    try world.addSystem(modifyFooBarBuzz, ModifySystems);
 
-    try world.runSystem();
+    try world.runSystem(PrintSystems);
+    try world.runSystem(ModifySystems);
+    try world.runSystem(PrintSystems);
 }
 
 fn printFooBarBuzz(entities: []struct { foo: *const Foo, buzz: *const Buzz }, entities2: []struct { bar: *const Bar }) void {

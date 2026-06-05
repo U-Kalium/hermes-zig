@@ -160,19 +160,25 @@ pub const EntityId = u64;
 pub const World = struct {
     components: Components,
     last_entity_id: EntityId,
-    systems: ArrayList(System),
+    systems: StringHashmap(ArrayList(System)),
 
     allocator: Allocator,
 
     const Self = @This();
 
+    const WorldError = error{TriedRunningNoneExistingSystemGroup};
+
     pub fn init(allocator: Allocator) World {
-        return World{ .components = Components.init(allocator), .last_entity_id = 0, .systems = .empty, .allocator = allocator };
+        return World{ .components = Components.init(allocator), .last_entity_id = 0, .systems = .init(allocator), .allocator = allocator };
     }
 
     pub fn deinit(self: *Self) void {
         self.components.deinit();
-        self.systems.deinit(self.allocator);
+        // var systems_iterator = self.systems.iterator();
+        // while (systems_iterator.next()) |entry| {
+        //     entry.value_ptr.deinit(self.allocator);
+        // }
+        self.systems.deinit();
         self.* = undefined;
     }
 
@@ -192,13 +198,23 @@ pub const World = struct {
         return self.last_entity_id;
     }
 
-    pub fn addSystem(self: *Self, f: anytype) !void {
+    pub fn addSystem(self: *Self, f: anytype, comptime group: type) !void {
+        const group_name = @typeName(group);
         const sys = System.init(f);
-        try self.systems.append(self.allocator, sys);
+        var group_systems = try self.systems.getOrPut(group_name);
+        if (group_systems.found_existing) {
+            try group_systems.value_ptr.append(self.allocator, sys);
+        } else {
+            var new_group_system: ArrayList(System) = .empty;
+            try new_group_system.append(self.allocator, sys);
+            group_systems.value_ptr.* = new_group_system;
+        }
+        // try self.systems.put(group_name, sys);
     }
 
-    pub fn runSystem(self: *Self) !void {
-        for (self.systems.items) |*sys| {
+    pub fn runSystem(self: *Self, comptime group: type) !void {
+        const group_systems = self.systems.getPtr(@typeName(group)) orelse return WorldError.TriedRunningNoneExistingSystemGroup;
+        for (group_systems.items) |*sys| {
             try sys.run(&self.components);
         }
     }
