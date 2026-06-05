@@ -1,0 +1,212 @@
+const std = @import("std");
+const ArrayList = std.ArrayList;
+const StringHashmap = std.StringHashMap;
+const Type = std.builtin.Type;
+const TypeId = std.builtin.TypeId;
+const Allocator = std.mem.Allocator;
+
+const sparset = @import("sparseset.zig");
+const AnySet = sparset.AnySet;
+const SparseSet = sparset.SparseSet;
+
+const ENTITY_SET_CAPACITY = 255;
+const Components = struct {
+    map: StringHashmap(AnySet),
+
+    allocator: Allocator,
+
+    fn init(allocator: Allocator) Components {
+        return .{ .map = .init(allocator), .allocator = allocator };
+    }
+
+    fn deinit(self: *Components) void {
+        var iter = self.map.iterator();
+
+        while (iter.next()) |set| {
+            set.value_ptr.deinit(self.allocator);
+        }
+        self.map.deinit();
+        self.* = undefined;
+    }
+
+    pub fn addComponent(
+        self: *Components,
+        comptime T: type,
+        comp: T,
+        entity_id: EntityId,
+    ) !void {
+        if (self.map.getPtr(@typeName(T))) |any_set| {
+            var set: *SparseSet(T) = any_set.downcast(T);
+            try set.insert(entity_id, comp);
+        } else {
+            var set = try self.allocator.create(SparseSet(T));
+
+            set.* = try .init(self.allocator, ENTITY_SET_CAPACITY);
+            try set.insert(entity_id, comp);
+            const any_set = AnySet.init(*SparseSet(T), set);
+            try self.map.put(@typeName(T), any_set);
+        }
+    }
+
+    fn query(self: *Components, comptime E: type) !E {
+        const allocator = std.heap.page_allocator;
+        const info = @typeInfo(E);
+        const Q = info.pointer.child;
+        const fields = @typeInfo(info.pointer.child).@"struct".fields;
+
+        var sets: [fields.len]*AnySet = undefined;
+        var sets_len: [fields.len]usize = undefined;
+        var smallest_idx: usize = 0;
+        var smallest_len: usize = std.math.maxInt(usize);
+
+        inline for (fields, 0..) |field, field_idx| {
+            const deref_field_type = @typeInfo(field.type).pointer.child;
+            const type_name = @typeName(deref_field_type);
+            const set = self.map.getPtr(type_name).?;
+            sets_len[field_idx] = set.len();
+            sets[field_idx] = set;
+        }
+        for (sets_len, 0..) |len, idx| {
+            if (len < smallest_len) {
+                smallest_idx = idx;
+                smallest_len = len;
+            }
+        }
+        var entity_ids: ArrayList(EntityId) = .empty;
+        defer entity_ids.deinit(allocator);
+        for (sets[smallest_idx].getEntities()) |entity| {
+            if (for (sets, 0..) |set, idx| {
+                if (idx == smallest_idx or set.contains(entity)) {
+                    break true;
+                }
+            } else false) {
+                try entity_ids.append(allocator, entity);
+            }
+        }
+        var comps = try ArrayList(Q).initCapacity(allocator, entity_ids.items.len);
+        for (entity_ids.items) |id| {
+            var query_struct: Q = undefined;
+            inline for (fields, 0..) |field, set_idx| {
+                const set_deref = @typeInfo(field.type).pointer.child;
+                const typed_set = sets[set_idx].downcast(set_deref);
+                @field(query_struct, field.name) = typed_set.get(id).?;
+            }
+            comps.appendAssumeCapacity(query_struct);
+        }
+
+        return comps.toOwnedSlice(allocator);
+    }
+};
+
+const System = struct {
+    func: *const anyopaque,
+    run_func: *const fn (self_any: *const anyopaque, comps: *Components) anyerror!void,
+
+    const Self = @This();
+
+    fn init(f: anytype) System {
+        const T = @TypeOf(f);
+        const info = @typeInfo(T);
+        const fn_info = info.@"fn";
+        const params = comptime fn_info.params;
+        comptime {
+            if (info != .@"fn") @compileError("Expected a function");
+            if (fn_info.return_type != void) @compileError("Expected function with return type of void");
+            if (fn_info.params.len == 0) @compileError("Expected function with params");
+
+            for (params) |param_opt| {
+                const param = @typeInfo(param_opt.type.?);
+                _ = isParamValidQuery(param);
+            }
+        }
+
+        const run_func = comptime struct {
+            fn run(self_any: *const anyopaque, comps: *Components) !void {
+                const self: *const T = @ptrCast(@alignCast(self_any));
+
+                const args_type: type = comptime t: {
+                    var field_types: [params.len]type = undefined;
+
+                    for (params, 0..) |param, i| {
+                        field_types[i] = param.type.?;
+                    }
+
+                    break :t @Tuple(&field_types);
+                };
+
+                var args: args_type = undefined;
+                const args_info = @typeInfo(args_type).@"struct";
+                inline for (args_info.fields) |field| {
+                    const query = try comps.query(field.type);
+                    @field(args, field.name) = query;
+                }
+                @call(.auto, self, args);
+            }
+        };
+
+        return .{
+            .func = @ptrCast(&f),
+            .run_func = run_func.run,
+        };
+    }
+
+    fn run(self: *Self, comps: *Components) !void {
+        try self.run_func(self.func, comps);
+    }
+};
+
+pub const EntityId = u64;
+
+pub const World = struct {
+    components: Components,
+    last_entity_id: EntityId,
+    systems: ArrayList(System),
+
+    allocator: Allocator,
+
+    const Self = @This();
+
+    pub fn init(allocator: Allocator) World {
+        return World{ .components = Components.init(allocator), .last_entity_id = 0, .systems = .empty, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.components.deinit();
+        self.systems.deinit(self.allocator);
+        self.* = undefined;
+    }
+
+    pub fn createEntity(self: *World, entity: anytype) !EntityId {
+        const T = @TypeOf(entity);
+        const info = @typeInfo(T);
+        comptime {
+            if (info != .@"struct" or !info.@"struct".is_tuple)
+                @compileError("Expected a tuple, found " ++ @typeName(T));
+        }
+        self.last_entity_id += 1;
+
+        inline for (info.@"struct".fields) |field| {
+            try self.components.addComponent(field.type, @field(entity, field.name), self.last_entity_id);
+        }
+
+        return self.last_entity_id;
+    }
+
+    pub fn addSystem(self: *Self, f: anytype) !void {
+        const sys = System.init(f);
+        try self.systems.append(self.allocator, sys);
+    }
+
+    pub fn runSystem(self: *Self) !void {
+        for (self.systems.items) |*sys| {
+            try sys.run(&self.components);
+        }
+    }
+};
+
+fn isParamValidQuery(param: Type) bool {
+    if (param.pointer.size != .slice) @compileError("Expected function param to be a slice");
+    const child = @typeInfo(param.pointer.child);
+    if (child != .@"struct") @compileError("Slice should be of structs");
+    return true;
+}
