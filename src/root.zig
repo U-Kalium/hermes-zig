@@ -7,3 +7,4 @@ const Allocator = std.mem.Allocator;
 
 pub const ecs = @import("ecs.zig");
 pub const World = ecs.World;
+pub const EntityManager = ecs.EntityManager;

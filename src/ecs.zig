@@ -100,7 +100,7 @@ const Components = struct {
 
 const System = struct {
     func: *const anyopaque,
-    run_func: *const fn (self_any: *const anyopaque, comps: *Components) anyerror!void,
+    run_func: *const fn (self_any: *const anyopaque, comps: *Components, last_entity_id: *EntityId) anyerror!void,
 
     const Self = @This();
 
@@ -115,13 +115,13 @@ const System = struct {
             if (fn_info.params.len == 0) @compileError("Expected function with params");
 
             for (params) |param_opt| {
-                const param = @typeInfo(param_opt.type.?);
-                _ = isParamValidQuery(param);
+                // const param = @typeInfo(param_opt.type.?);
+                _ = isParamValidQuery(param_opt.type.?);
             }
         }
 
         const run_func = comptime struct {
-            fn run(self_any: *const anyopaque, comps: *Components) !void {
+            fn run(self_any: *const anyopaque, comps: *Components, last_entity_id: *EntityId) !void {
                 const self: *const T = @ptrCast(@alignCast(self_any));
 
                 const args_type: type = comptime t: {
@@ -137,8 +137,13 @@ const System = struct {
                 var args: args_type = undefined;
                 const args_info = @typeInfo(args_type).@"struct";
                 inline for (args_info.fields) |field| {
-                    const query = try comps.query(field.type);
-                    @field(args, field.name) = query;
+                    if (field.type == EntityManager) {
+                        const manager = EntityManager{ .last_entity_id = last_entity_id, .components = comps };
+                        @field(args, field.name) = manager;
+                    } else {
+                        const query = try comps.query(field.type);
+                        @field(args, field.name) = query;
+                    }
                 }
                 @call(.auto, self, args);
             }
@@ -150,8 +155,8 @@ const System = struct {
         };
     }
 
-    fn run(self: *Self, comps: *Components) !void {
-        try self.run_func(self.func, comps);
+    fn run(self: *Self, comps: *Components, last_entity_id: *EntityId) !void {
+        try self.run_func(self.func, comps, last_entity_id);
     }
 };
 
@@ -215,14 +220,43 @@ pub const World = struct {
     pub fn runSystem(self: *Self, comptime group: type) !void {
         const group_systems = self.systems.getPtr(@typeName(group)) orelse return WorldError.TriedRunningNoneExistingSystemGroup;
         for (group_systems.items) |*sys| {
-            try sys.run(&self.components);
+            try sys.run(&self.components, &self.last_entity_id);
         }
     }
 };
 
-fn isParamValidQuery(param: Type) bool {
-    if (param.pointer.size != .slice) @compileError("Expected function param to be a slice");
-    const child = @typeInfo(param.pointer.child);
-    if (child != .@"struct") @compileError("Slice should be of structs");
-    return true;
+pub const EntityManager = struct {
+    last_entity_id: *EntityId,
+    components: *Components,
+
+    const Self = @This();
+
+    pub fn createEntity(self: *const Self, entity: anytype) !EntityId {
+        const T = @TypeOf(entity);
+        const info = @typeInfo(T);
+        comptime {
+            if (info != .@"struct" or !info.@"struct".is_tuple)
+                @compileError("Expected a tuple, found " ++ @typeName(T));
+        }
+        self.last_entity_id.* += 1;
+
+        inline for (info.@"struct".fields) |field| {
+            try self.components.addComponent(field.type, @field(entity, field.name), self.last_entity_id.*);
+        }
+
+        return self.last_entity_id.*;
+    }
+};
+
+fn isParamValidQuery(param: type) bool {
+    if (param == EntityManager) {
+        return true;
+    } else {
+        const info = @typeInfo(param);
+        if (info == .pointer) {
+            const child = @typeInfo(info.pointer.child);
+            if (child == .@"struct") return true;
+        }
+    }
+    @compileError("Expected function param to be a slice or of type EntityManager");
 }

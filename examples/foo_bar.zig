@@ -9,12 +9,26 @@ const Buzz = struct { a: f32 };
 
 const PrintSystems = struct {};
 const ModifySystems = struct {};
+const InitSystems = struct {};
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     var world = ecs.World.init(allocator);
     defer world.deinit();
 
+    try world.addSystem(initEntities, InitSystems);
+    try world.addSystem(printFooBarBuzz, PrintSystems);
+    try world.addSystem(modifyFooBarBuzz, ModifySystems);
+
+    try world.runSystem(InitSystems);
+
+    try world.runSystem(PrintSystems);
+    try world.runSystem(ModifySystems);
+    try world.runSystem(PrintSystems);
+}
+
+fn initEntities(manager: ecs.EntityManager) void {
+    // var manager = manager;
     const foo = Foo{ .bar = 10 };
     const bar = Bar{ .buzz = "Your Mom" };
     const buzz = Buzz{ .a = 4.20 };
@@ -24,18 +38,11 @@ pub fn main() !void {
 
     const foo3 = Foo{ .bar = 21 };
 
-    _ = try world.createEntity(.{ foo, bar, buzz });
-    _ = try world.createEntity(.{ foo2, buzz2 });
-    _ = try world.createEntity(.{
+    _ = manager.createEntity(.{ foo, bar, buzz }) catch @panic("Could not create entity");
+    _ = manager.createEntity(.{ foo2, buzz2 }) catch @panic("Could not create entity");
+    _ = manager.createEntity(.{
         foo3,
-    });
-
-    try world.addSystem(printFooBarBuzz, PrintSystems);
-    try world.addSystem(modifyFooBarBuzz, ModifySystems);
-
-    try world.runSystem(PrintSystems);
-    try world.runSystem(ModifySystems);
-    try world.runSystem(PrintSystems);
+    }) catch @panic("Could not create entity");
 }
 
 fn printFooBarBuzz(entities: []struct { foo: *const Foo, buzz: *const Buzz }, entities2: []struct { bar: *const Bar }) void {
