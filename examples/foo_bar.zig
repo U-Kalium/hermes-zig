@@ -11,8 +11,8 @@ const PrintSystems = struct {};
 const ModifySystems = struct {};
 const InitSystems = struct {};
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
     var world = ecs.World.init(allocator);
     defer world.deinit();
 
@@ -21,7 +21,6 @@ pub fn main() !void {
     try world.addSystem(modifyFooBarBuzz, ModifySystems);
 
     try world.runSystem(InitSystems);
-
     try world.runSystem(PrintSystems);
     try world.runSystem(ModifySystems);
     try world.runSystem(PrintSystems);

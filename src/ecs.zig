@@ -54,7 +54,7 @@ const Components = struct {
         const Q = info.pointer.child;
         const fields = @typeInfo(info.pointer.child).@"struct".fields;
 
-        var sets: [fields.len]*AnySet = undefined;
+        var sets: [fields.len]?*AnySet = undefined;
         var sets_len: [fields.len]usize = undefined;
         var smallest_idx: usize = 0;
         var smallest_len: usize = std.math.maxInt(usize);
@@ -62,9 +62,9 @@ const Components = struct {
         inline for (fields, 0..) |field, field_idx| {
             const deref_field_type = @typeInfo(field.type).pointer.child;
             const type_name = @typeName(deref_field_type);
-            const set = self.map.getPtr(type_name).?;
-            sets_len[field_idx] = set.len();
-            sets[field_idx] = set;
+            const maybe_set = self.map.getPtr(type_name);
+            sets_len[field_idx] = if (maybe_set) |set| set.len() else 0;
+            sets[field_idx] = maybe_set;
         }
         for (sets_len, 0..) |len, idx| {
             if (len < smallest_len) {
@@ -74,9 +74,9 @@ const Components = struct {
         }
         var entity_ids: ArrayList(EntityId) = .empty;
         defer entity_ids.deinit(allocator);
-        for (sets[smallest_idx].getEntities()) |entity| {
-            if (for (sets, 0..) |set, idx| {
-                if (idx == smallest_idx or set.contains(entity)) {
+        for (if (sets[smallest_idx]) |set| set.getEntities() else &.{}) |entity| {
+            if (for (sets, 0..) |maybe_set, idx| {
+                if (idx == smallest_idx or if (maybe_set) |set| set.contains(entity) else false) {
                     break true;
                 }
             } else false) {
@@ -88,8 +88,10 @@ const Components = struct {
             var query_struct: Q = undefined;
             inline for (fields, 0..) |field, set_idx| {
                 const set_deref = @typeInfo(field.type).pointer.child;
-                const typed_set = sets[set_idx].downcast(set_deref);
-                @field(query_struct, field.name) = typed_set.get(id).?;
+                if (sets[set_idx]) |set| {
+                    const typed_set = set.downcast(set_deref);
+                    @field(query_struct, field.name) = typed_set.get(id).?;
+                }
             }
             comps.appendAssumeCapacity(query_struct);
         }
@@ -181,10 +183,10 @@ pub const World = struct {
 
     pub fn deinit(self: *Self) void {
         self.components.deinit();
-        // var systems_iterator = self.systems.iterator();
-        // while (systems_iterator.next()) |entry| {
-        //     entry.value_ptr.deinit(self.allocator);
-        // }
+        var systems_iterator = self.systems.iterator();
+        while (systems_iterator.next()) |entry| {
+            entry.value_ptr.deinit(self.allocator);
+        }
         self.systems.deinit();
         self.* = undefined;
     }

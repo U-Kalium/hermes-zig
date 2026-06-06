@@ -47,6 +47,7 @@ pub fn SparseSet(comptime value: type) type {
 
         fn opaqueFree(ptr: *anyopaque, allocator: Allocator) void {
             const typed: *Self = @ptrCast(@alignCast(ptr));
+            typed.deinit();
 
             allocator.destroy(typed);
         }
