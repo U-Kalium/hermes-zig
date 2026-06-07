@@ -32,3 +32,32 @@ fn fooBarSys(entities: []struct {
         // std.debug.print("foo.a: {}", .{entity.foo.a});
     }
 }
+
+test "Query with entity id" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = gpa.allocator();
+    var world = World.init(allocator);
+    defer world.deinit();
+
+    try world.addSystem(fooBarIdSys, TestSchedule);
+    const id = try world.createEntity(.{Foo{ .a = 10 }});
+    _ = try world.createEntity(.{id});
+
+    try world.runSystem(TestSchedule);
+}
+
+const Entity = ecs.EntityId;
+
+fn fooBarIdSys(
+    entities: []struct {
+        foo: *const Foo,
+        id: ecs.EntityId,
+    },
+    entities2: []struct {
+        entity: *Entity,
+    },
+) !void {
+    for (entities, entities2) |entity, entity2| {
+        try expect(entity2.entity.* == entity.id);
+    }
+}

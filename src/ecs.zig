@@ -15,6 +15,11 @@ const Components = struct {
 
     allocator: Allocator,
 
+    const ComponentsError = error{
+        NonPointerFieldWhichIsntEntityId,
+        UnkownComponentQueryStructMember,
+    };
+
     fn init(allocator: Allocator) Components {
         return .{ .map = .init(allocator), .allocator = allocator };
     }
@@ -62,11 +67,17 @@ const Components = struct {
         var smallest_len: usize = std.math.maxInt(usize);
 
         inline for (fields, 0..) |field, field_idx| {
-            const deref_field_type = @typeInfo(field.type).pointer.child;
-            const type_name = @typeName(deref_field_type);
-            const maybe_set = self.map.getPtr(type_name);
-            sets_len[field_idx] = if (maybe_set) |set| set.len() else 0;
-            sets[field_idx] = maybe_set;
+            const field_type_info = @typeInfo(field.type);
+            switch (field_type_info) {
+                .pointer => |p| {
+                    const deref_field_type = p.child;
+                    const type_name = @typeName(deref_field_type);
+                    const maybe_set = self.map.getPtr(type_name);
+                    sets_len[field_idx] = if (maybe_set) |set| set.len() else 0;
+                    sets[field_idx] = maybe_set;
+                },
+                else => {},
+            }
         }
         for (sets_len, 0..) |len, idx| {
             if (len < smallest_len) {
@@ -89,20 +100,45 @@ const Components = struct {
         for (entity_ids.items) |id| {
             var query_struct: Q = undefined;
             inline for (fields, 0..) |field, set_idx| {
-                const set_deref = @typeInfo(field.type).pointer.child;
-                if (sets[set_idx]) |set| {
-                    const typed_set = set.downcast(set_deref);
-                    if (std.mem.eql(u8, field.name, "id") and field.type == EntityId) {
-                        @field(query_struct, field.name) = id;
-                    } else {
-                        if (typed_set.get(id)) |data| {
-                            @field(query_struct, field.name) = data;
+                const field_deref = @typeInfo(field.type);
+                switch (field_deref) {
+                    .int => {
+                        if (std.mem.eql(u8, field.name, "id") and field.type == EntityId) {
+                            @field(query_struct, field.name) = id;
                         } else {
-                            query_not_possible = true;
+                            return ComponentsError.NonPointerFieldWhichIsntEntityId;
                         }
-                        // @field(query_struct, field.name) = typed_set.get(id).?;
-                    }
+                    },
+                    .pointer => |p| {
+                        const set_deref = p.child;
+                        if (sets[set_idx]) |set| {
+                            const typed_set = set.downcast(set_deref);
+                            if (typed_set.get(id)) |data| {
+                                @field(query_struct, field.name) = data;
+                            } else {
+                                query_not_possible = true;
+                            }
+                            // @field(query_struct, field.name) = typed_set.get(id).?;
+                        }
+                    },
+                    else => {
+                        return ComponentsError.UnkownComponentQueryStructMember;
+                    },
                 }
+                // if (std.mem.eql(u8, field.name, "id") and field.type == EntityId) {
+                //     @field(query_struct, field.name) = id;
+                // } else {
+                //     const set_deref = @typeInfo(field.type).pointer.child;
+                //     if (sets[set_idx]) |set| {
+                //         const typed_set = set.downcast(set_deref);
+                //         if (typed_set.get(id)) |data| {
+                //             @field(query_struct, field.name) = data;
+                //         } else {
+                //             query_not_possible = true;
+                //         }
+                //         // @field(query_struct, field.name) = typed_set.get(id).?;
+                //     }
+                // }
             }
             comps.appendAssumeCapacity(query_struct);
         }
