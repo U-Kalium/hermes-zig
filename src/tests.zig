@@ -17,6 +17,9 @@ test "Querying non existant entities" {
     defer world.deinit();
 
     try world.addSystem(fooBarSys, TestSchedule);
+    const bar: Bar = 10.0;
+    _ = try world.createEntity(.{bar});
+    _ = try world.createEntity(.{Foo{ .a = 10 }});
     try world.runSystem(TestSchedule);
     // try expect(true);
 }
@@ -26,5 +29,6 @@ fn fooBarSys(entities: []struct {
 }) !void {
     for (entities) |entity| {
         entity.bar.* += 1.0;
+        // std.debug.print("foo.a: {}", .{entity.foo.a});
     }
 }

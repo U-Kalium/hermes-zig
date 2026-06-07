@@ -54,6 +54,8 @@ const Components = struct {
         const Q = info.pointer.child;
         const fields = @typeInfo(info.pointer.child).@"struct".fields;
 
+        var query_not_possible = false;
+
         var sets: [fields.len]?*AnySet = undefined;
         var sets_len: [fields.len]usize = undefined;
         var smallest_idx: usize = 0;
@@ -76,7 +78,7 @@ const Components = struct {
         defer entity_ids.deinit(allocator);
         for (if (sets[smallest_idx]) |set| set.getEntities() else &.{}) |entity| {
             if (for (sets, 0..) |maybe_set, idx| {
-                if (idx == smallest_idx or if (maybe_set) |set| set.contains(entity) else false) {
+                if (idx == smallest_idx and if (maybe_set) |set| set.contains(entity) else false) {
                     break true;
                 }
             } else false) {
@@ -93,13 +95,20 @@ const Components = struct {
                     if (std.mem.eql(u8, field.name, "id") and field.type == EntityId) {
                         @field(query_struct, field.name) = id;
                     } else {
-                        @field(query_struct, field.name) = typed_set.get(id).?;
+                        if (typed_set.get(id)) |data| {
+                            @field(query_struct, field.name) = data;
+                        } else {
+                            query_not_possible = true;
+                        }
+                        // @field(query_struct, field.name) = typed_set.get(id).?;
                     }
                 }
             }
             comps.appendAssumeCapacity(query_struct);
         }
-
+        if (query_not_possible) {
+            return &[_]Q{};
+        }
         return comps.toOwnedSlice(allocator);
     }
 };
