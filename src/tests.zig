@@ -6,9 +6,10 @@ const expect = std.testing.expect;
 
 const Foo = struct { a: u32 };
 const Bar = f32;
-const Buzz = union(enum) { u32, f64 };
+const Buzz = u32;
 
 const TestSchedule = struct {};
+const TestSchedule2 = struct {};
 
 test "Querying non existant entities" {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -60,4 +61,42 @@ fn fooBarIdSys(
     for (entities, entities2) |entity, entity2| {
         try expect(entity2.entity.* == entity.id);
     }
+}
+
+test "Adding components to existing entities" {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = gpa.allocator();
+    var world = World.init(allocator);
+    defer world.deinit();
+
+    _ = try world.createEntity(.{Foo{ .a = 10 }});
+    try world.addSystem(addBuzzAndBarToFooEntity, TestSchedule);
+    try world.addSystem(fooBarBuzzSys, TestSchedule2);
+
+    try world.runSystem(TestSchedule);
+    try world.runSystem(TestSchedule2);
+}
+
+fn addBuzzAndBarToFooEntity(
+    entities: []struct {
+        foo: *const Foo,
+        id: ecs.EntityId,
+    },
+    manager: EntityManager,
+) !void {
+    const buzz: Buzz = 10;
+    const bar: Bar = 3.14;
+    for (entities) |entity| {
+        try manager.addComponents(entity.id, .{ buzz, bar });
+        // try manager.addCOmponent(Buzz, buzz, entity.id);
+        // try manager.addCOmponent(Bar, bar, entity.id);
+    }
+}
+
+fn fooBarBuzzSys(entities: []struct {
+    foo: *const Foo,
+    bar: *const Bar,
+    buzz: *const Buzz,
+}) !void {
+    try expect(entities.len > 0);
 }

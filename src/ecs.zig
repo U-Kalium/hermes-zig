@@ -299,6 +299,22 @@ pub const EntityManager = struct {
 
         return self.last_entity_id.*;
     }
+
+    pub fn addComponents(self: *const Self, entity_id: EntityId, components: anytype) !void {
+        const comp_type = @TypeOf(components);
+        const comp_info = @typeInfo(comp_type);
+        comptime {
+            if (comp_info != .@"struct") @compileError("Expected components to be a struct");
+        }
+        const fields = comp_info.@"struct".fields;
+        inline for (fields) |field| {
+            try self.components.addComponent(field.type, @field(components, field.name), entity_id);
+        }
+    }
+
+    pub fn addCOmponent(self: *const Self, comptime T: type, comp: T, entity_id: EntityId) !void {
+        try self.components.addComponent(T, comp, entity_id);
+    }
 };
 
 fn isParamValidQuery(param: type) bool {
