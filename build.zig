@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const lib_module = b.addModule("hermes", .{ .root_source_file = b.path("src/root.zig") });
+    const lib_module = b.addModule("hermes", .{ .root_source_file = b.path("src/root.zig"), .target = target, .optimize = optimize });
 
     const example_foo_bar = b.addExecutable(.{
         .name = "foo_bar",
@@ -27,6 +27,19 @@ pub fn build(b: *std.Build) void {
     example_foo_bar.root_module.addImport("hermes", lib_module);
 
     // example_test.root_module.linkLibrary(lib);
+
+    const tests_module = b.addModule("tests", .{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const tests = b.addTest(.{
+        .root_module = tests_module,
+    });
+    const run_tests = b.addRunArtifact(tests);
+
+    const test_step = b.step("tests", "run tests");
+    test_step.dependOn(&run_tests.step);
 
     b.installArtifact(lib);
 

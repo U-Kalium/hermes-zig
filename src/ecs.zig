@@ -90,7 +90,11 @@ const Components = struct {
                 const set_deref = @typeInfo(field.type).pointer.child;
                 if (sets[set_idx]) |set| {
                     const typed_set = set.downcast(set_deref);
-                    @field(query_struct, field.name) = typed_set.get(id).?;
+                    if (std.mem.eql(u8, field.name, "id") and field.type == EntityId) {
+                        @field(query_struct, field.name) = id;
+                    } else {
+                        @field(query_struct, field.name) = typed_set.get(id).?;
+                    }
                 }
             }
             comps.appendAssumeCapacity(query_struct);
